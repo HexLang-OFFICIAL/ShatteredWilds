@@ -2,365 +2,188 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>KKK: Shattered Wilds - Combat & Stamina</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shattered Wilds - Survival RPG</title>
   <style>
-    html, body { margin: 0; overflow: hidden; height: 100%; background: #000; font-family: monospace; }
-    #renderCanvas { width: 100%; height: 100%; touch-action: none; display: block; }
+    /* Basic HUD styling */
     #hud {
       position: fixed;
-      top: 10px; left: 10px;
-      color: #0f0;
-      font-size: 14px;
-      background: rgba(0,0,0,0.6);
-      padding: 8px;
-      border-radius: 6px;
-      width: 220px;
+      bottom: 20px;
+      left: 20px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: white;
       user-select: none;
     }
-    #hud > div {
-      margin-bottom: 6px;
+    .bar-container {
+      background: #444;
+      width: 200px;
+      height: 20px;
+      margin-bottom: 8px;
+      border-radius: 5px;
+      overflow: hidden;
     }
     .bar {
-      background: #222;
-      border: 1px solid #0f0;
-      border-radius: 4px;
-      height: 14px;
-      width: 100%;
-      position: relative;
-    }
-    .bar-fill {
-      background: #0f0;
       height: 100%;
-      border-radius: 4px;
-      width: 100%;
       transition: width 0.3s ease;
     }
-    #inventory, #crafting {
-      position: fixed;
-      bottom: 10px; left: 10px;
-      background: rgba(0,0,0,0.7);
-      border: 1px solid #0f0;
-      padding: 10px;
-      width: 200px;
-      max-height: 200px;
-      overflow-y: auto;
-      font-size: 13px;
+    #health-bar {
+      background: #e74c3c;
+      width: 100%;
     }
-    #crafting {
-      left: auto;
-      right: 10px;
+    #stamina-bar {
+      background: #f1c40f;
+      width: 100%;
+    }
+    #level-text {
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    #inventory {
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 8px;
+      max-width: 300px;
     }
   </style>
 </head>
-<body>
-  <canvas id="renderCanvas"></canvas>
-  
+<body style="margin:0; background:#222; color:#fff;">
   <div id="hud">
-    <div>Health</div>
-    <div class="bar"><div id="healthBar" class="bar-fill"></div></div>
-    <div>Stamina</div>
-    <div class="bar"><div id="staminaBar" class="bar-fill"></div></div>
-    <div>Level: <span id="level">1</span> | XP: <span id="xp">0</span></div>
-  </div>
-
-  <div id="inventory">
-    <div><strong>Inventory</strong></div>
-    <ul id="inventoryList"></ul>
-  </div>
-
-  <div id="crafting">
-    <div><strong>Crafting</strong></div>
-    <div>Coming Soon: Recipes & crafting buttons!</div>
+    <div id="level-text">Level: 1</div>
+    <div class="bar-container"><div id="health-bar" class="bar"></div></div>
+    <div class="bar-container"><div id="stamina-bar" class="bar"></div></div>
+    <div id="inventory">Inventory: Empty</div>
   </div>
 
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script>
-    const canvas = document.getElementById("renderCanvas");
-    const engine = new BABYLON.Engine(canvas, true);
-
-    // Player stats
-    let player = {
+    // Player Object — your badass avatar
+    const player = {
+      position: new BABYLON.Vector3(0, 1.8, 0),
       health: 100,
+      maxHealth: 100,
       stamina: 100,
       maxStamina: 100,
-      speed: 0.12,
-      position: new BABYLON.Vector3(0, 1.8, 0),
-      isAttacking: false,
-      attackCooldown: 0,
       level: 1,
       xp: 0,
-      inventory: {
-        "mutant claw": 0,
-        "glow plant": 0,
-      }
+      isAttacking: false,
+      attackCooldown: 0,
     };
 
-    // HUD bars and text
-    const healthBar = document.getElementById("healthBar");
-    const staminaBar = document.getElementById("staminaBar");
-    const levelText = document.getElementById("level");
-    const xpText = document.getElementById("xp");
-    const inventoryList = document.getElementById("inventoryList");
+    // Beast enemy — dumb but deadly
+    const beast = {
+      position: new BABYLON.Vector3(5, 1.8, 5),
+      health: 50,
+      isAlive: true,
+      patrolRadius: 10,
+      patrolCenter: new BABYLON.Vector3(5, 1.8, 5),
+      patrolDirection: 1,
+      speed: 0.05,
+    };
 
-    // Show inventory in UI
+    // HUD Elements
+    const healthBar = document.getElementById('health-bar');
+    const staminaBar = document.getElementById('stamina-bar');
+    const levelText = document.getElementById('level-text');
+    const inventoryDiv = document.getElementById('inventory');
+
+    // Update inventory UI - simple list for now
+    const inventory = [];
+
     function updateInventoryUI() {
-      inventoryList.innerHTML = "";
-      for(const item in player.inventory) {
-        let li = document.createElement("li");
-        li.textContent = `${item}: ${player.inventory[item]}`;
-        inventoryList.appendChild(li);
+      if (inventory.length === 0) {
+        inventoryDiv.textContent = 'Inventory: Empty';
+      } else {
+        inventoryDiv.textContent = 'Inventory: ' + inventory.join(', ');
       }
     }
 
-    // Create projectile for ranged attack
-    function createProjectile(startPos, direction, scene) {
-      let proj = BABYLON.MeshBuilder.CreateSphere("proj", {diameter: 0.3}, scene);
-      proj.position = startPos.clone();
-      proj.material = new BABYLON.StandardMaterial("projMat", scene);
-      proj.material.diffuseColor = new BABYLON.Color3(1, 1, 0);
-
-      proj.speed = 0.3;
-      proj.direction = direction.normalize();
-
-      proj.isProjectile = true;
-
-      return proj;
+    // Level up logic - heal and buff the player
+    function levelUp() {
+      player.level++;
+      player.health = player.maxHealth;
+      player.stamina = player.maxStamina;
+      player.xp = 0; // Reset XP after leveling
+      alert(`You leveled the fuck up! Welcome to level ${player.level}!`);
+      levelText.textContent = `Level: ${player.level}`;
     }
 
-    const createScene = () => {
-      const scene = new BABYLON.Scene(engine);
-      scene.clearColor = new BABYLON.Color4(0, 0, 0, 1);
+    // Simple XP gain for demonstration
+    function gainXP(amount) {
+      player.xp += amount;
+      if (player.xp >= 100) levelUp();
+    }
 
-      // Camera
-      const camera = new BABYLON.FreeCamera("camera1", player.position.clone(), scene);
-      camera.attachControl(canvas, true);
-      camera.speed = 0;
+    // Main game loop
+    function gameLoop() {
+      if (!beast.isAlive) return;
 
-      // Light
-      const light = new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), scene);
-      light.intensity = 0.6;
-      light.specular = new BABYLON.Color3(0, 0.5, 0.7);
+      // Calculate distance between player and beast
+      const distToPlayer = BABYLON.Vector3.Distance(player.position, beast.position);
 
-      // Ground
-      const ground = BABYLON.MeshBuilder.CreateGround("ground", {width: 50, height: 50}, scene);
-      const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
-      groundMat.diffuseColor = new BABYLON.Color3(0.05, 0.05, 0.05);
-      groundMat.emissiveColor = new BABYLON.Color3(0, 0.1, 0.1);
-      ground.material = groundMat;
+      // Beast AI: Patrol or Chase
+      if (distToPlayer > 5) {
+        // Patrol in a circle around patrolCenter
+        const angleSpeed = 0.02 * beast.patrolDirection;
+        const dx = beast.position.x - beast.patrolCenter.x;
+        const dz = beast.position.z - beast.patrolCenter.z;
+        const angle = Math.atan2(dz, dx) + angleSpeed;
 
-      // Glowing plants
-      for(let i=0; i < 30; i++) {
-        const plant = BABYLON.MeshBuilder.CreateSphere("plant"+i, {diameter: 0.5}, scene);
-        plant.position = new BABYLON.Vector3(
-          (Math.random() - 0.5) * 40,
-          0.25,
-          (Math.random() - 0.5) * 40
-        );
-        const plantMat = new BABYLON.StandardMaterial("plantMat"+i, scene);
-        plantMat.diffuseColor = new BABYLON.Color3(0, 0.8, 0.5);
-        plantMat.emissiveColor = new BABYLON.Color3(0, 1, 0.7);
-        plant.material = plantMat;
-      }
+        beast.position.x = beast.patrolCenter.x + Math.cos(angle) * beast.patrolRadius;
+        beast.position.z = beast.patrolCenter.z + Math.sin(angle) * beast.patrolRadius;
 
-      // Mutant Beast
-      const beast = BABYLON.MeshBuilder.CreateBox("beast", {size: 1.5}, scene);
-      beast.position = new BABYLON.Vector3(5, 0.75, 5);
-      const beastMat = new BABYLON.StandardMaterial("beastMat", scene);
-      beastMat.diffuseColor = new BABYLON.Color3(0.5, 0, 0);
-      beastMat.emissiveColor = new BABYLON.Color3(0.7, 0, 0);
-      beast.material = beastMat;
+        // Flip direction occasionally
+        if (Math.random() < 0.005) beast.patrolDirection *= -1;
+      } else {
+        // Chase player like a pissed-off dog
+        const chaseDir = player.position.subtract(beast.position).normalize();
+        beast.position.addInPlace(chaseDir.scale(beast.speed));
 
-      // Beast eyes
-      const eyeL = BABYLON.MeshBuilder.CreateSphere("eyeL", {diameter: 0.2}, scene);
-      eyeL.position = new BABYLON.Vector3(5.4, 1.1, 5.3);
-      eyeL.material = new BABYLON.StandardMaterial("eyeMatL", scene);
-      eyeL.material.diffuseColor = new BABYLON.Color3(1, 1, 0);
-      const eyeR = eyeL.clone("eyeR");
-      eyeR.position.x = 4.6;
-
-      // Fog
-      scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
-      scene.fogDensity = 0.04;
-      scene.fogColor = new BABYLON.Color3(0, 0.2, 0.15);
-
-      // Beast AI vars
-      let beastState = "patrol";
-      let currentPatrolIndex = 0;
-      let patrolPoints = [
-        new BABYLON.Vector3(5, 0.75, 5),
-        new BABYLON.Vector3(10, 0.75, 10),
-        new BABYLON.Vector3(5, 0.75, 15),
-        new BABYLON.Vector3(0, 0.75, 10),
-      ];
-
-      // Input handling
-      const inputMap = {};
-      scene.actionManager = new BABYLON.ActionManager(scene);
-      scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyDownTrigger, evt => {
-        inputMap[evt.sourceEvent.key.toLowerCase()] = true;
-      }));
-      scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyUpTrigger, evt => {
-        inputMap[evt.sourceEvent.key.toLowerCase()] = false;
-      }));
-
-      // Mouse attack inputs
-      window.addEventListener("mousedown", (e) => {
-        if(player.attackCooldown > 0) return;
-
-        if(e.button === 0) {
-          // Melee attack (left click)
-          if(player.stamina >= 10) {
-            player.isAttacking = true;
-            player.stamina -= 10;
-            player.attackCooldown = 30; // cooldown frames (~0.5 sec)
-            // Check if beast in range (1.8 units)
-            const dist = BABYLON.Vector3.Distance(beast.position, player.position);
-            if(dist < 1.8) {
-              beast.health = (beast.health || 100) - 20;
-              if(beast.health <= 0) {
-                beast.dispose();
-                player.xp += 50;
-                updateXP();
-                player.inventory["mutant claw"]++;
-                updateInventoryUI();
-              }
-            }
+        // Attack if close enough
+        if (distToPlayer < 1.5 && !player.isAttacking) {
+          player.health -= 10;  // Beast hits like a truck
+          if (player.health <= 0) {
+            alert("You fucking died! Reload and try again, hero.");
+            resetPlayer();
           }
-        } else if(e.button === 2) {
-          // Ranged attack (right click)
-          if(player.stamina >= 15) {
-            player.stamina -= 15;
-            player.attackCooldown = 60; // slower cooldown
-            let forward = camera.getForwardRay().direction;
-            let proj = createProjectile(camera.position.add(forward.scale(1.5)), forward, scene);
-            scene.onBeforeRenderObservable.add(() => {
-              if(!proj) return;
-              proj.position.addInPlace(proj.direction.scale(proj.speed));
-              // If projectile hits beast
-              if(beast && BABYLON.Vector3.Distance(proj.position, beast.position) < 1.2) {
-                beast.health = (beast.health || 100) - 10;
-                if(beast.health <= 0) {
-                  beast.dispose();
-                  player.xp += 50;
-                  updateXP();
-                  player.inventory["mutant claw"]++;
-                  updateInventoryUI();
-                }
-                proj.dispose();
-                proj = null;
-              }
-              // Remove projectile if too far
-              if(proj && BABYLON.Vector3.Distance(proj.position, player.position) > 40) {
-                proj.dispose();
-                proj = null;
-              }
-            });
-          }
-        }
-      });
-
-      // Prevent context menu on right click (for ranged attack)
-      window.addEventListener("contextmenu", e => e.preventDefault());
-
-      // Update XP display and level up
-      function updateXP() {
-        xpText.textContent = player.xp;
-        while(player.xp >= player.level * 100) {
-          player.xp -= player.level * 100;
-          player.level++;
-          player.health = 100; // restore health on level up
-          player.stamina = player.maxStamina;
-          levelText.textContent = player.level;
-          alert("Level up! You're stronger now.");
         }
       }
 
-      // Game loop
-      scene.onBeforeRenderObservable.add(() => {
-        // Movement (WASD)
-        let dir = new BABYLON.Vector3.Zero();
-        if(inputMap["w"]) dir.z += 1;
-        if(inputMap["s"]) dir.z -= 1;
-        if(inputMap["a"]) dir.x -= 1;
-        if(inputMap["d"]) dir.x += 1;
-        dir = dir.normalize();
+      // Attack cooldown handling
+      if (player.attackCooldown > 0) {
+        player.attackCooldown--;
+        if (player.attackCooldown === 0) player.isAttacking = false;
+      }
 
-        // Running consumes stamina
-        if(inputMap["shift"] && dir.length() > 0 && player.stamina > 0) {
-          player.position.x += dir.x * player.speed * 1.7;
-          player.position.z += dir.z * player.speed * 1.7;
-          player.stamina -= 0.5;
-          if(player.stamina < 0) player.stamina = 0;
-        } else {
-          player.position.x += dir.x * player.speed;
-          player.position.z += dir.z * player.speed;
-          // Regen stamina slowly when not running or attacking
-          if(player.stamina < player.maxStamina && !player.isAttacking) {
-            player.stamina += 0.2;
-            if(player.stamina > player.maxStamina) player.stamina = player.maxStamina;
-          }
-        }
+      // Regenerate stamina slowly if not running or attacking
+      if (!player.isAttacking && player.stamina < player.maxStamina) {
+        player.stamina = Math.min(player.stamina + 0.3, player.maxStamina);
+      }
 
-        // Update camera position
-        camera.position.copyFrom(player.position);
-        camera.position.y = 1.8;
+      // Update HUD bars
+      healthBar.style.width = `${player.health}%`;
+      staminaBar.style.width = `${player.stamina}%`;
 
-        // Beast AI
-        if(beast) {
-          const distToPlayer = BABYLON.Vector3.Distance(beast.position, player.position);
-          if(distToPlayer < 8) {
-            beastState = "chase";
-          } else if(distToPlayer > 12) {
-            beastState = "patrol";
-          }
+      // Update inventory UI (for demonstration, no changes here)
+      updateInventoryUI();
 
-          if(beastState === "patrol") {
-            let target = patrolPoints[currentPatrolIndex];
-            let moveDir = target.subtract(beast.position).normalize();
-            beast.position.addInPlace(moveDir.scale(0.05));
-            if(BABYLON.Vector3.Distance(beast.position, target) < 0.5) {
-              currentPatrolIndex = (currentPatrolIndex + 1) % patrolPoints.length;
-            }
-          } else if(beastState === "chase")
-{
-let chaseDir = player.position.subtract(beast.position).normalize();
-beast.position.addInPlace(chaseDir.scale(0.1));
-// If close enough, attack player
-if(distToPlayer < 1.5 && !player.isAttacking) {
-player.health -= 1;
-if(player.health <= 0) {
-alert("You died! Reload to try again.");
-player.health = 100;
-player.stamina = player.maxStamina;
-player.position = new BABYLON.Vector3(0, 1.8, 0);
-levelText.textContent = player.level;
-}
-}
-}
-}
-        // Update stamina cooldowns
-    if(player.attackCooldown > 0) {
-      player.attackCooldown--;
-      if(player.attackCooldown === 0) player.isAttacking = false;
+      requestAnimationFrame(gameLoop);
     }
 
-    // Update HUD bars
-    healthBar.style.width = (player.health) + "%";
-    staminaBar.style.width = (player.stamina) + "%";
-  });
+    // Reset player on death
+    function resetPlayer() {
+      player.health = player.maxHealth;
+      player.stamina = player.maxStamina;
+      player.position = new BABYLON.Vector3(0, 1.8, 0);
+      player.isAttacking = false;
+      player.attackCooldown = 0;
+      levelText.textContent = `Level: ${player.level}`;
+    }
 
-  updateInventoryUI();
+    // Starting the loop
+    gameLoop();
 
-  return scene;
-};
+    // TODO: Add player controls, attacks, XP system, inventory pickups, mutations...
 
-const scene = createScene();
-
-engine.runRenderLoop(() => {
-  scene.render();
-});
-
-window.addEventListener("resize", () => {
-  engine.resize();
-});
-</script> </body> </html> 
+  </script>
+</body>
+</html>
