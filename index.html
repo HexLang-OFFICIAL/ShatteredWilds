@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>KKK: Shattered Wilds - Live Demo</title>
+  <style>
+    html, body { margin: 0; overflow: hidden; height: 100%; background: #000; }
+    #renderCanvas { width: 100%; height: 100%; touch-action: none; display: block; }
+    #hud {
+      position: fixed;
+      top: 10px; left: 10px;
+      color: #0f0;
+      font-family: monospace;
+      font-size: 14px;
+      background: rgba(0,0,0,0.5);
+      padding: 8px;
+      border-radius: 6px;
+      width: 200px;
+    }
+    #hud > div {
+      margin-bottom: 6px;
+    }
+    .bar {
+      background: #222;
+      border: 1px solid #0f0;
+      border-radius: 4px;
+      height: 14px;
+      width: 100%;
+      position: relative;
+    }
+    .bar-fill {
+      background: #0f0;
+      height: 100%;
+      border-radius: 4px;
+      width: 100%;
+      transition: width 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+  <div id="hud">
+    <div>Health</div>
+    <div class="bar"><div id="healthBar" class="bar-fill"></div></div>
+    <div>Stamina</div>
+    <div class="bar"><div id="staminaBar" class="bar-fill"></div></div>
+  </div>
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script>
+    const canvas = document.getElementById("renderCanvas");
+    const engine = new BABYLON.Engine(canvas, true);
+
+    // Player stats
+    let player = {
+      health: 100,
+      stamina: 100,
+      speed: 0.1,
+      position: new BABYLON.Vector3(0, 1.8, 0),
+      isAttacking: false,
+    };
+
+    // HUD bars
+    const healthBar = document.getElementById("healthBar");
+    const staminaBar = document.getElementById("staminaBar");
+
+    const createScene = () => {
+      const scene = new BABYLON.Scene(engine);
+      scene.clearColor = new BABYLON.Color4(0, 0, 0, 1);
+
+      // Camera: attach to player position
+      const camera = new BABYLON.FreeCamera("camera1", player.position.clone(), scene);
+      camera.attachControl(canvas, true);
+      camera.speed = 0;
+
+      // Light - glowing moonlight
+      const light = new BABYLON.HemisphericLight("light1", new BABYLON.Vector3(0, 1, 0), scene);
+      light.intensity = 0.6;
+      light.specular = new BABYLON.Color3(0, 0.5, 0.7);
+
+      // Ground
+      const ground = BABYLON.MeshBuilder.CreateGround("ground", {width: 50, height: 50}, scene);
+      const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+      groundMat.diffuseColor = new BABYLON.Color3(0.05, 0.05, 0.05);
+      groundMat.emissiveColor = new BABYLON.Color3(0, 0.1, 0.1);
+      ground.material = groundMat;
+
+      // Glowing plants
+      const plantCount = 30;
+      for(let i=0; i < plantCount; i++) {
+        const plant = BABYLON.MeshBuilder.CreateSphere("plant"+i, {diameter: 0.5}, scene);
+        plant.position = new BABYLON.Vector3(
+          (Math.random() - 0.5) * 40,
+          0.25,
+          (Math.random() - 0.5) * 40
+        );
+
+        const plantMat = new BABYLON.StandardMaterial("plantMat"+i, scene);
+        plantMat.diffuseColor = new BABYLON.Color3(0, 0.8, 0.5);
+        plantMat.emissiveColor = new BABYLON.Color3(0, 1, 0.7);
+        plant.material = plantMat;
+      }
+
+      // Mutant Beast - placeholder cube with eyes
+      const beast = BABYLON.MeshBuilder.CreateBox("beast", {size: 1.5}, scene);
+      beast.position = new BABYLON.Vector3(5, 0.75, 5);
+      const beastMat = new BABYLON.StandardMaterial("beastMat", scene);
+      beastMat.diffuseColor = new BABYLON.Color3(0.5, 0, 0);
+      beastMat.emissiveColor = new BABYLON.Color3(0.7, 0, 0);
+      beast.material = beastMat;
+
+      // Eyes on beast
+      const eyeL = BABYLON.MeshBuilder.CreateSphere("eyeL", {diameter: 0.2}, scene);
+      eyeL.position = new BABYLON.Vector3(5.4, 1.1, 5.3);
+      eyeL.material = new BABYLON.StandardMaterial("eyeMatL", scene);
+      eyeL.material.diffuseColor = new BABYLON.Color3(1, 1, 0);
+
+      const eyeR = eyeL.clone("eyeR");
+      eyeR.position.x = 4.6;
+
+      // Fog for atmosphere
+      scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
+      scene.fogDensity = 0.04;
+      scene.fogColor = new BABYLON.Color3(0, 0.2, 0.15);
+
+      // Variables for beast AI
+      let beastState = "patrol"; // "patrol" or "chase"
+      let beastTarget = null;
+      let patrolPoints = [
+        new BABYLON.Vector3(5, 0.75, 5),
+        new BABYLON.Vector3(10, 0.75, 10),
+        new BABYLON.Vector3(5, 0.75, 15),
+        new BABYLON.Vector3(0, 0.75, 10),
+      ];
+      let currentPatrolIndex = 0;
+
+      // Player movement inputs
+      const inputMap = {};
+      scene.actionManager = new BABYLON.ActionManager(scene);
+      scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyDownTrigger, evt => {
+        inputMap[evt.sourceEvent.key.toLowerCase()] = true;
+      }));
+      scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyUpTrigger, evt => {
+        inputMap[evt.sourceEvent.key.toLowerCase()] = false;
+      }));
+
+      // Game loop for movement, AI, and updates
+      scene.onBeforeRenderObservable.add(() => {
+        // PLAYER MOVEMENT (WASD + mouse look is default for FreeCamera)
+        let direction = new BABYLON.Vector3.Zero();
+        if(inputMap["w"]) direction.z += 1;
+        if(inputMap["s"]) direction.z -= 1;
+        if(inputMap["a"]) direction.x -= 1;
+        if(inputMap["d"]) direction.x += 1;
+        direction = direction.normalize();
+
+        player.position.x += direction.x * player.speed;
+        player.position.z += direction.z * player.speed;
+
+        camera.position.copyFrom(player.position);
+        camera.position.y = 1.8;
+
+        // BEAST AI
+        const distToPlayer = BABYLON.Vector3.Distance(beast.position, player.position);
+        if(distToPlayer < 8) {
+          beastState = "chase";
+          beastTarget = player.position.clone();
+        } else if(distToPlayer > 12) {
+          beastState = "patrol";
+          beastTarget = patrolPoints[currentPatrolIndex];
+        }
+
+        if(beastState === "patrol") {
+          const target = patrolPoints[currentPatrolIndex];
+          let moveDir = target.subtract(beast.position).normalize();
+          beast.position.addInPlace(moveDir.scale(0.05));
+          if(BABYLON.Vector3.Distance(beast.position, target) < 0.5) {
+            currentPatrolIndex = (currentPatrolIndex + 1) % patrolPoints.length;
+          }
+        }
+
+        if(beastState === "chase") {
+          let moveDir = player.position.subtract(beast.position).normalize();
+          beast.position.addInPlace(moveDir.scale(0.08));
+          if(distToPlayer < 1.5) {
+            // Attack player
+            player.health -= 0.3;
+            if(player.health < 0) player.health = 0;
+          }
+        }
+
+        // Update HUD bars
+        healthBar.style.width = player.health + "%";
+        staminaBar.style.width = player.stamina + "%";
+      });
+
+      return scene;
+    };
+
+    const scene = createScene();
+
+    engine.runRenderLoop(() => {
+      scene.render();
+    });
+
+    window.addEventListener("resize", () => {
+      engine.resize();
+    });
+  </script>
+</body>
+</html>
